@@ -24,7 +24,6 @@ class AlarmService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val notificationManager =
                     context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
                 val alarmChannel = NotificationChannel(
                     CHANNEL_ID_ALARM,
                     "Task Alarms",
@@ -36,7 +35,6 @@ class AlarmService : Service() {
                     setBypassDnd(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
-
                 val tasksChannel = NotificationChannel(
                     CHANNEL_ID_TASKS,
                     "Task Updates",
@@ -44,7 +42,6 @@ class AlarmService : Service() {
                 ).apply {
                     description = "General task notifications"
                 }
-
                 notificationManager.createNotificationChannel(alarmChannel)
                 notificationManager.createNotificationChannel(tasksChannel)
             }
@@ -68,7 +65,6 @@ class AlarmService : Service() {
         startForeground(NOTIFICATION_ID_ALARM, buildAlarmNotification(taskTitle, taskId))
         startRinging()
         launchPopupActivity(taskId, taskTitle, taskDesc)
-
         return START_STICKY
     }
 
@@ -81,7 +77,6 @@ class AlarmService : Service() {
             this, taskId.toInt(), fullScreenIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val stopIntent = Intent(this, AlarmService::class.java).apply {
             action = ACTION_STOP_ALARM
         }
@@ -89,6 +84,45 @@ class AlarmService : Service() {
             this, 0, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID_ALARM)
-            .setSmallIcon(R.dra
+            .setSmallIcon(R.drawable.ic_task_notification)
+            .setContentTitle("TASK ALARM: $title")
+            .setContentText("Time to crush it!")
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(fullScreenPendingIntent, true)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .addAction(R.drawable.ic_check, "Dismiss", stopPendingIntent)
+            .build()
+    }
+
+    private fun launchPopupActivity(taskId: Long, title: String, desc: String) {
+        val popupIntent = Intent(this, AlarmPopupActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_NO_USER_ACTION or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(AlarmScheduler.EXTRA_TASK_ID, taskId)
+            putExtra(AlarmScheduler.EXTRA_TASK_TITLE, title)
+            putExtra(AlarmScheduler.EXTRA_TASK_DESC, desc)
+        }
+        startActivity(popupIntent)
+    }
+
+    private fun startRinging() {
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        val pattern = longArrayOf(0, 800, 400, 800, 400, 800)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(pattern, 0)
+        }
+        try {
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
