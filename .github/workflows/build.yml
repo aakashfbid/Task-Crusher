@@ -31,161 +31,185 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-      - name: Fix Kotlin source files
+      - name: Fix activity source files
         run: |
-          cat > app/src/main/java/com/taskcrusher/service/AlarmService.kt << 'KOTLINEOF'
-          package com.taskcrusher.service
+          mkdir -p app/src/main/java/com/taskcrusher/ui/activities
 
-          import android.app.*
-          import android.content.Context
-          import android.content.Intent
-          import android.media.AudioAttributes
-          import android.media.MediaPlayer
-          import android.media.RingtoneManager
-          import android.os.*
-          import androidx.core.app.NotificationCompat
-          import com.taskcrusher.R
-          import com.taskcrusher.ui.activities.AlarmPopupActivity
-          import com.taskcrusher.utils.AlarmScheduler
+          cat > app/src/main/java/com/taskcrusher/ui/activities/AddTaskActivity.kt << 'ENDOFFILE'
+          package com.taskcrusher.ui.activities
 
-          class AlarmService : Service() {
-              companion object {
-                  const val CHANNEL_ID_ALARM = "alarm_channel"
-                  const val CHANNEL_ID_TASKS = "tasks_channel"
-                  const val NOTIFICATION_ID_ALARM = 1001
-                  const val ACTION_STOP_ALARM = "com.taskcrusher.ACTION_STOP_ALARM"
+          import android.app.DatePickerDialog
+          import android.app.TimePickerDialog
+          import android.os.Bundle
+          import android.view.View
+          import android.widget.Toast
+          import androidx.activity.viewModels
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.lifecycle.lifecycleScope
+          import com.taskcrusher.data.models.Task
+          import com.taskcrusher.databinding.ActivityAddTaskBinding
+          import com.taskcrusher.ui.TaskViewModel
+          import kotlinx.coroutines.launch
+          import java.text.SimpleDateFormat
+          import java.util.*
 
-                  fun createNotificationChannels(context: Context) {
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                          val alarmChannel = NotificationChannel(CHANNEL_ID_ALARM, "Task Alarms", NotificationManager.IMPORTANCE_HIGH).apply {
-                              description = "Critical task alarm notifications"
-                              enableVibration(true)
-                              vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
-                              setBypassDnd(true)
-                              lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+          class AddTaskActivity : AppCompatActivity() {
+              private lateinit var binding: ActivityAddTaskBinding
+              private val viewModel: TaskViewModel by viewModels()
+              private var selectedTimeMillis: Long = 0L
+              private var existingTaskId: Long = -1L
+              private val calendar = Calendar.getInstance()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  binding = ActivityAddTaskBinding.inflate(layoutInflater)
+                  setContentView(binding.root)
+                  setSupportActionBar(binding.toolbar)
+                  supportActionBar?.setDisplayHomeAsUpEnabled(true)
+                  existingTaskId = intent.getLongExtra("task_id", -1L)
+                  if (existingTaskId != -1L) loadExistingTask() else supportActionBar?.title = "Brain Dump"
+                  setupClickListeners()
+              }
+
+              private fun loadExistingTask() {
+                  lifecycleScope.launch {
+                      val task = viewModel.getTaskById(existingTaskId)
+                      task?.let {
+                          binding.etTaskTitle.setText(it.title)
+                          binding.etTaskDescription.setText(it.description)
+                          if (it.alarmTimeMillis > 0) {
+                              selectedTimeMillis = it.alarmTimeMillis
+                              binding.switchAlarm.isChecked = it.hasAlarm
+                              updateTimeDisplay()
                           }
-                          val tasksChannel = NotificationChannel(CHANNEL_ID_TASKS, "Task Updates", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                              description = "General task notifications"
-                          }
-                          notificationManager.createNotificationChannel(alarmChannel)
-                          notificationManager.createNotificationChannel(tasksChannel)
+                          supportActionBar?.title = "Edit Task"
                       }
                   }
               }
 
-              private var mediaPlayer: MediaPlayer? = null
-              private var vibrator: Vibrator? = null
-              private var taskId: Long = -1L
-
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  taskId = intent?.getLongExtra(AlarmScheduler.EXTRA_TASK_ID, -1L) ?: -1L
-                  val taskTitle = intent?.getStringExtra(AlarmScheduler.EXTRA_TASK_TITLE) ?: "Task Alarm"
-                  val taskDesc = intent?.getStringExtra(AlarmScheduler.EXTRA_TASK_DESC) ?: ""
-                  if (intent?.action == ACTION_STOP_ALARM) {
-                      stopAlarm()
-                      return START_NOT_STICKY
+              private fun setupClickListeners() {
+                  binding.switchAlarm.setOnCheckedChangeListener { _, isChecked ->
+                      binding.layoutAlarmTime.visibility = if (isChecked) View.VISIBLE else View.GONE
+                      if (isChecked && selectedTimeMillis == 0L) openDateTimePicker()
                   }
-                  startForeground(NOTIFICATION_ID_ALARM, buildAlarmNotification(taskTitle, taskId))
-                  startRinging()
-                  launchPopupActivity(taskId, taskTitle, taskDesc)
-                  return START_STICKY
+                  binding.btnPickTime.setOnClickListener { openDateTimePicker() }
+                  binding.btnSaveTask.setOnClickListener { saveTask() }
               }
 
-              private fun buildAlarmNotification(title: String, taskId: Long): Notification {
-                  val fullScreenIntent = Intent(this, AlarmPopupActivity::class.java).apply {
-                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION
-                      putExtra(AlarmScheduler.EXTRA_TASK_ID, taskId)
+              private fun openDateTimePicker() {
+                  val now = Calendar.getInstance()
+                  DatePickerDialog(this, { _, year, month, day ->
+                      calendar.set(year, month, day)
+                      TimePickerDialog(this, { _, hour, minute ->
+                          calendar.set(Calendar.HOUR_OF_DAY, hour)
+                          calendar.set(Calendar.MINUTE, minute)
+                          calendar.set(Calendar.SECOND, 0)
+                          selectedTimeMillis = calendar.timeInMillis
+                          updateTimeDisplay()
+                      }, now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE), false).show()
+                  }, now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH)).show()
+              }
+
+              private fun updateTimeDisplay() {
+                  val sdf = SimpleDateFormat("EEE, MMM d h:mm a", Locale.getDefault())
+                  binding.tvSelectedTime.text = sdf.format(Date(selectedTimeMillis))
+                  binding.tvSelectedTime.visibility = View.VISIBLE
+              }
+
+              private fun saveTask() {
+                  val title = binding.etTaskTitle.text.toString().trim()
+                  if (title.isEmpty()) { binding.etTaskTitle.error = "Give your task a name!"; return }
+                  val hasAlarm = binding.switchAlarm.isChecked
+                  if (hasAlarm && (selectedTimeMillis == 0L || selectedTimeMillis <= System.currentTimeMillis())) {
+                      Toast.makeText(this, "Pick a future time for the alarm!", Toast.LENGTH_SHORT).show()
+                      return
                   }
-                  val fullScreenPendingIntent = PendingIntent.getActivity(
-                      this, taskId.toInt(), fullScreenIntent,
-                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  val task = Task(
+                      id = if (existingTaskId != -1L) existingTaskId else 0,
+                      title = title,
+                      description = binding.etTaskDescription.text.toString().trim(),
+                      alarmTimeMillis = if (hasAlarm) selectedTimeMillis else 0L,
+                      hasAlarm = hasAlarm
                   )
-                  val stopIntent = Intent(this, AlarmService::class.java).apply {
-                      action = ACTION_STOP_ALARM
-                  }
-                  val stopPendingIntent = PendingIntent.getService(
-                      this, 0, stopIntent,
-                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                  )
-                  return NotificationCompat.Builder(this, CHANNEL_ID_ALARM)
-                      .setSmallIcon(R.drawable.ic_task_notification)
-                      .setContentTitle("TASK ALARM: $title")
-                      .setContentText("Time to crush it!")
-                      .setPriority(NotificationCompat.PRIORITY_MAX)
-                      .setCategory(NotificationCompat.CATEGORY_ALARM)
-                      .setFullScreenIntent(fullScreenPendingIntent, true)
-                      .setAutoCancel(false)
-                      .setOngoing(true)
-                      .addAction(R.drawable.ic_check, "Dismiss", stopPendingIntent)
-                      .build()
-              }
-
-              private fun launchPopupActivity(taskId: Long, title: String, desc: String) {
-                  val popupIntent = Intent(this, AlarmPopupActivity::class.java).apply {
-                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                      putExtra(AlarmScheduler.EXTRA_TASK_ID, taskId)
-                      putExtra(AlarmScheduler.EXTRA_TASK_TITLE, title)
-                      putExtra(AlarmScheduler.EXTRA_TASK_DESC, desc)
-                  }
-                  startActivity(popupIntent)
-              }
-
-              private fun startRinging() {
-                  vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                      val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                      vibratorManager.defaultVibrator
+                  if (existingTaskId != -1L) {
+                      viewModel.updateTask(task)
+                      Toast.makeText(this, "Task updated!", Toast.LENGTH_SHORT).show()
                   } else {
-                      @Suppress("DEPRECATION")
-                      getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                      viewModel.insertTask(task)
+                      Toast.makeText(this, "Task saved! Let's crush it!", Toast.LENGTH_SHORT).show()
                   }
-                  val pattern = longArrayOf(0, 800, 400, 800, 400, 800)
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
-                  } else {
-                      @Suppress("DEPRECATION")
-                      vibrator?.vibrate(pattern, 0)
-                  }
-                  try {
-                      val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                          ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                      mediaPlayer = MediaPlayer().apply {
-                          setDataSource(this@AlarmService, alarmUri)
-                          setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-                          isLooping = true
-                          prepare()
-                          start()
-                      }
-                  } catch (e: Exception) {
-                      e.printStackTrace()
-                  }
+                  finish()
               }
 
-              fun stopAlarm() {
-                  mediaPlayer?.apply { if (isPlaying) stop(); release() }
-                  mediaPlayer = null
-                  vibrator?.cancel()
-                  stopForeground(true)
-                  stopSelf()
-              }
-
-              override fun onBind(intent: Intent?): IBinder? = null
-              override fun onDestroy() { stopAlarm(); super.onDestroy() }
+              override fun onSupportNavigateUp(): Boolean { finish(); return true }
           }
-          KOTLINEOF
+          ENDOFFILE
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          cat > app/src/main/java/com/taskcrusher/ui/activities/AlarmPopupActivity.kt << 'ENDOFFILE'
+          package com.taskcrusher.ui.activities
 
-      - name: Grant execute permission
-        run: chmod +x gradlew
+          import android.content.Intent
+          import android.graphics.Color
+          import android.os.Bundle
+          import android.view.WindowManager
+          import android.view.animation.AnimationUtils
+          import androidx.activity.viewModels
+          import androidx.appcompat.app.AlertDialog
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.lifecycle.lifecycleScope
+          import com.taskcrusher.R
+          import com.taskcrusher.databinding.ActivityAlarmPopupBinding
+          import com.taskcrusher.service.AlarmService
+          import com.taskcrusher.ui.TaskViewModel
+          import com.taskcrusher.utils.AlarmScheduler
+          import com.taskcrusher.utils.PersonalityManager
+          import kotlinx.coroutines.launch
+          import java.util.*
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+          class AlarmPopupActivity : AppCompatActivity() {
+              private lateinit var binding: ActivityAlarmPopupBinding
+              private val viewModel: TaskViewModel by viewModels()
+              private var taskId: Long = -1L
+              private var snoozeCount: Int = 0
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: TaskCrusher-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.addFlags(
+                      WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                      WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                      WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                      WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                  )
+                  binding = ActivityAlarmPopupBinding.inflate(layoutInflater)
+                  setContentView(binding.root)
+                  taskId = intent.getLongExtra(AlarmScheduler.EXTRA_TASK_ID, -1L)
+                  val taskTitle = intent.getStringExtra(AlarmScheduler.EXTRA_TASK_TITLE) ?: "Your Task"
+                  val taskDesc = intent.getStringExtra(AlarmScheduler.EXTRA_TASK_DESC) ?: ""
+                  setupUI(taskTitle, taskDesc)
+                  loadTaskDetails()
+              }
+
+              private fun loadTaskDetails() {
+                  lifecycleScope.launch {
+                      val task = viewModel.getTaskById(taskId)
+                      task?.let {
+                          snoozeCount = it.snoozeCount
+                          applyUrgencyTheme(snoozeCount)
+                          applyPersonalityMessage(snoozeCount)
+                      }
+                  }
+              }
+
+              private fun setupUI(title: String, desc: String) {
+                  binding.tvTaskTitle.text = title
+                  binding.tvTaskDesc.text = desc.ifEmpty { "Time to get this done!" }
+                  binding.btnAccept.setOnClickListener { stopAlarmService(); viewModel.markComplete(taskId); finish() }
+                  binding.btnSnooze.setOnClickListener { showSnoozeMenu() }
+              }
+
+              private fun applyUrgencyTheme(snoozeCount: Int) {
+                  val bgColor = when { snoozeCount == 0 -> Color.parseColor("#0D2137"); snoozeCount <= 2 -> Color.parseColor("#1A1000"); else -> Color.parseColor("#1A0000") }
+                  val borderColor = when { snoozeCount == 0 -> Color.parseColor("#00FFFF"); snoozeCount <= 2 -> Color.parseColor("#FF8C00"); else -> Color.parseColor("#DC143C") }
+                  binding.rootLayout.setBackgroundColor(bgColor)
+                  binding.cardTask.strokeColor = borderColor
+                  binding.btnAccept.setBackgroundC
