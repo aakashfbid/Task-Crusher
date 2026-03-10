@@ -212,4 +212,289 @@ jobs:
                   val borderColor = when { snoozeCount == 0 -> Color.parseColor("#00FFFF"); snoozeCount <= 2 -> Color.parseColor("#FF8C00"); else -> Color.parseColor("#DC143C") }
                   binding.rootLayout.setBackgroundColor(bgColor)
                   binding.cardTask.strokeColor = borderColor
-                  binding.btnAccept.setBackgroundC
+                  binding.btnAccept.setBackgroundColor(borderColor)
+                  if (snoozeCount >= 3) {
+                      binding.cardTask.startAnimation(AnimationUtils.loadAnimation(this, R.anim.pulse))
+                      binding.tvSnoozeWarning.apply {
+                          visibility = android.view.View.VISIBLE
+                          text = "$snoozeCount snoozes! STOP DELAYING!"
+                          setTextColor(Color.parseColor("#FF4444"))
+                      }
+                  }
+              }
+
+              private fun applyPersonalityMessage(snoozeCount: Int) {
+                  val prefs = getSharedPreferences("taskcrusher_prefs", MODE_PRIVATE)
+                  val mode = PersonalityManager.getModeFromString(prefs.getString("personality_mode", "hype_man") ?: "hype_man")
+                  binding.tvPersonalityMessage.text = PersonalityManager.getAlarmPhrase(mode, snoozeCount)
+              }
+
+              private fun showSnoozeMenu() {
+                  AlertDialog.Builder(this, R.style.DarkAlertDialog)
+                      .setTitle("Reschedule Task")
+                      .setItems(arrayOf("+1 Hour", "+2 Hours", "Custom Time")) { _, which ->
+                          when (which) {
+                              0 -> snoozeForMillis(60 * 60 * 1000L)
+                              1 -> snoozeForMillis(2 * 60 * 60 * 1000L)
+                              2 -> showCustomTimePicker()
+                          }
+                      }
+                      .setNegativeButton("Cancel", null).show()
+              }
+
+              private fun showCustomTimePicker() {
+                  val calendar = Calendar.getInstance()
+                  android.app.TimePickerDialog(this, { _, hour, minute ->
+                      val newCal = Calendar.getInstance().apply {
+                          set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, minute); set(Calendar.SECOND, 0)
+                          if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_MONTH, 1)
+                      }
+                      snoozeTask(newCal.timeInMillis)
+                  }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), false).show()
+              }
+
+              private fun snoozeForMillis(millis: Long) { snoozeTask(System.currentTimeMillis() + millis) }
+              private fun snoozeTask(newTimeMillis: Long) { stopAlarmService(); viewModel.snoozeTask(taskId, newTimeMillis); finish() }
+              private fun stopAlarmService() {
+                  startService(Intent(this, AlarmService::class.java).apply { action = AlarmService.ACTION_STOP_ALARM })
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {}
+          }
+          ENDOFFILE
+
+          cat > app/src/main/java/com/taskcrusher/ui/activities/MainActivity.kt << 'ENDOFFILE'
+          package com.taskcrusher.ui.activities
+
+          import android.Manifest
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.view.Menu
+          import android.view.MenuItem
+          import android.view.View
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.activity.viewModels
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.ContextCompat
+          import androidx.recyclerview.widget.LinearLayoutManager
+          import com.google.android.material.snackbar.Snackbar
+          import com.google.android.material.tabs.TabLayout
+          import com.taskcrusher.R
+          import com.taskcrusher.databinding.ActivityMainBinding
+          import com.taskcrusher.service.AlarmService
+          import com.taskcrusher.ui.TaskViewModel
+          import com.taskcrusher.ui.adapters.TaskAdapter
+          import com.taskcrusher.utils.AlarmScheduler
+
+          class MainActivity : AppCompatActivity() {
+              private lateinit var binding: ActivityMainBinding
+              private val viewModel: TaskViewModel by viewModels()
+              private lateinit var activeAdapter: TaskAdapter
+              private lateinit var completedAdapter: TaskAdapter
+
+              private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  binding = ActivityMainBinding.inflate(layoutInflater)
+                  setContentView(binding.root)
+                  AlarmService.createNotificationChannels(this)
+                  requestPermissions()
+                  setupUI()
+                  observeData()
+              }
+
+              private fun requestPermissions() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                          notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                      }
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !AlarmScheduler.canScheduleExactAlarms(this)) {
+                      Snackbar.make(binding.root, "Please allow exact alarms for task reminders", Snackbar.LENGTH_LONG)
+                          .setAction("Allow") {
+                              startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply { data = Uri.parse("package:$packageName") })
+                          }.show()
+                  }
+              }
+
+              private fun setupUI() {
+                  setSupportActionBar(binding.toolbar)
+                  binding.fabAddTask.setOnClickListener { startActivity(Intent(this, AddTaskActivity::class.java)) }
+                  binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+                      override fun onTabSelected(tab: TabLayout.Tab) { if (tab.position == 0) showActiveList() else showCompletedList() }
+                      override fun onTabUnselected(tab: TabLayout.Tab?) {}
+                      override fun onTabReselected(tab: TabLayout.Tab?) {}
+                  })
+                  activeAdapter = TaskAdapter(
+                      onComplete = { task -> viewModel.markComplete(task.id) },
+                      onEdit = { task -> startActivity(Intent(this, AddTaskActivity::class.java).apply { putExtra("task_id", task.id) }) },
+                      onDelete = { task -> viewModel.deleteTask(task) }
+                  )
+                  completedAdapter = TaskAdapter(onComplete = {}, onEdit = {}, onDelete = { task -> viewModel.deleteTask(task) }, isCompletedList = true)
+                  binding.rvTasks.layoutManager = LinearLayoutManager(this)
+                  binding.rvTasks.adapter = activeAdapter
+              }
+
+              private fun showActiveList() { binding.rvTasks.adapter = activeAdapter }
+              private fun showCompletedList() { binding.rvTasks.adapter = completedAdapter }
+
+              private fun observeData() {
+                  viewModel.activeTasks.observe(this) { tasks ->
+                      activeAdapter.submitList(tasks)
+                      updateProcrastinationPet(tasks.sumOf { it.snoozeCount })
+                      binding.tvEmptyState.visibility = if (tasks.isEmpty() && binding.tabLayout.selectedTabPosition == 0) View.VISIBLE else View.GONE
+                  }
+                  viewModel.completedTasks.observe(this) { tasks -> completedAdapter.submitList(tasks) }
+              }
+
+              private fun updateProcrastinationPet(totalSnoozes: Int) {
+                  binding.tvPet.text = when { totalSnoozes == 0 -> "Dragon"; totalSnoozes <= 3 -> "Worried"; totalSnoozes <= 7 -> "Stressed"; else -> "Monster" }
+                  binding.tvPetLabel.text = when { totalSnoozes == 0 -> "Crusher is thriving!"; totalSnoozes <= 3 -> "Crusher is a little worried..."; totalSnoozes <= 7 -> "Crusher is stressed!"; else -> "Crusher became a Monster!" }
+              }
+
+              override fun onCreateOptionsMenu(menu: Menu): Boolean { menuInflater.inflate(R.menu.main_menu, menu); return true }
+              override fun onOptionsItemSelected(item: MenuItem): Boolean {
+                  return when (item.itemId) {
+                      R.id.action_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
+                      R.id.action_weekly_wrap -> { startActivity(Intent(this, WeeklyWrapUpActivity::class.java)); true }
+                      else -> super.onOptionsItemSelected(item)
+                  }
+              }
+          }
+          ENDOFFILE
+
+          cat > app/src/main/java/com/taskcrusher/ui/activities/WeeklyWrapUpActivity.kt << 'ENDOFFILE'
+          package com.taskcrusher.ui.activities
+
+          import android.content.ContentValues
+          import android.graphics.Bitmap
+          import android.graphics.Canvas
+          import android.graphics.Color
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Environment
+          import android.provider.MediaStore
+          import android.view.View
+          import android.widget.Toast
+          import androidx.activity.viewModels
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.lifecycle.lifecycleScope
+          import com.github.mikephil.charting.data.*
+          import com.taskcrusher.databinding.ActivityWeeklyWrapupBinding
+          import com.taskcrusher.ui.TaskViewModel
+          import kotlinx.coroutines.launch
+          import java.io.File
+          import java.io.FileOutputStream
+          import java.io.OutputStream
+          import java.text.SimpleDateFormat
+          import java.util.*
+
+          class WeeklyWrapUpActivity : AppCompatActivity() {
+              private lateinit var binding: ActivityWeeklyWrapupBinding
+              private val viewModel: TaskViewModel by viewModels()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  binding = ActivityWeeklyWrapupBinding.inflate(layoutInflater)
+                  setContentView(binding.root)
+                  setSupportActionBar(binding.toolbar)
+                  supportActionBar?.setDisplayHomeAsUpEnabled(true)
+                  supportActionBar?.title = "Weekly Wrap-Up"
+                  loadStats()
+                  binding.btnDownloadJpg.setOnClickListener { saveWrapUpAsJpg() }
+                  binding.rgPeriod.setOnCheckedChangeListener { _, _ -> loadStats() }
+              }
+
+              private fun loadStats() {
+                  lifecycleScope.launch {
+                      val isMonthly = binding.rbMonthly.isChecked
+                      val stats = if (isMonthly) viewModel.getMonthlyStats() else viewModel.getWeeklyStats()
+                      val period = if (isMonthly) "Monthly" else "Weekly"
+                      binding.tvHeadline.text = when {
+                          stats.completedCount == 0 -> "No tasks crushed this $period. Time to get serious!"
+                          stats.totalSnoozes == 0 -> "PERFECT! Crushed ${stats.completedCount} tasks with ZERO snoozes!"
+                          else -> "Crushed ${stats.completedCount} tasks, snoozed ${stats.totalSnoozes} times this $period"
+                      }
+                      binding.tvMostSnoozed.text = stats.mostSnoozedTask?.let { "Most snoozed: \"${it.title}\" (${it.snoozeCount}x)" } ?: "No overdue tasks! Legend!"
+                      setupBarChart(stats.completedTasks)
+                      setupPieChart(stats.completedCount, stats.totalSnoozes)
+                  }
+              }
+
+              private fun setupBarChart(tasks: List<com.taskcrusher.data.models.Task>) {
+                  val sdf = SimpleDateFormat("EEE", Locale.getDefault())
+                  val grouped = tasks.groupBy { sdf.format(Date(it.completedAt)) }.entries.mapIndexed { index, entry -> BarEntry(index.toFloat(), entry.value.size.toFloat()) }
+                  if (grouped.isEmpty()) { binding.barChart.visibility = View.GONE; return }
+                  val dataSet = BarDataSet(grouped, "Tasks Completed").apply { colors = listOf(Color.parseColor("#00FFFF")); valueTextColor = Color.WHITE }
+                  binding.barChart.apply {
+                      data = BarData(dataSet); description.isEnabled = false; setBackgroundColor(Color.TRANSPARENT)
+                      legend.textColor = Color.WHITE; xAxis.textColor = Color.WHITE; axisLeft.textColor = Color.WHITE; axisRight.isEnabled = false; animateY(800); invalidate()
+                  }
+              }
+
+              private fun setupPieChart(completed: Int, snoozes: Int) {
+                  if (completed + snoozes == 0) { binding.pieChart.visibility = View.GONE; return }
+                  val entries = listOf(PieEntry(completed.toFloat(), "Crushed"), PieEntry(snoozes.toFloat(), "Snoozed"))
+                  val dataSet = PieDataSet(entries, "").apply { colors = listOf(Color.parseColor("#00FFFF"), Color.parseColor("#FF8C00")); valueTextColor = Color.WHITE; valueTextSize = 14f }
+                  binding.pieChart.apply {
+                      data = PieData(dataSet); description.isEnabled = false; setBackgroundColor(Color.TRANSPARENT)
+                      legend.textColor = Color.WHITE; setHoleColor(Color.parseColor("#121212")); holeRadius = 40f; animateY(1000); invalidate()
+                  }
+              }
+
+              private fun saveWrapUpAsJpg() {
+                  val view = binding.scrollContent
+                  val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                  val canvas = Canvas(bitmap)
+                  canvas.drawColor(Color.parseColor("#121212"))
+                  view.draw(canvas)
+                  val filename = "TaskCrusher_WrapUp_${System.currentTimeMillis()}.jpg"
+                  var outputStream: OutputStream? = null
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                          val contentValues = ContentValues().apply {
+                              put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                              put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                              put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/TaskCrusher")
+                          }
+                          val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                          outputStream = uri?.let { contentResolver.openOutputStream(it) }
+                      } else {
+                          val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "TaskCrusher")
+                          dir.mkdirs()
+                          outputStream = FileOutputStream(File(dir, filename))
+                      }
+                      outputStream?.use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                      Toast.makeText(this, "Saved to Pictures/TaskCrusher!", Toast.LENGTH_LONG).show()
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
+                  }
+              }
+
+              override fun onSupportNavigateUp(): Boolean { finish(); return true }
+          }
+          ENDOFFILE
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: |
+          echo "Starting build..."
+          ./gradlew assembleDebug --stacktrace --no-build-cache
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TaskCrusher-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
