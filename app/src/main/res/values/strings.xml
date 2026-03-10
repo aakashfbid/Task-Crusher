@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TaskCrusher</string>
+    <string name="notification_channel_alarm">Task Alarms</string>
+    <string name="notification_channel_tasks">Task Updates</string>
+</resources>
