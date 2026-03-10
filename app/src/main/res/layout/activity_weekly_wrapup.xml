@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_dark">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:titleTextColor="@color/accent_cyan"
+        android:background="@color/bg_dark" />
+
+    <RadioGroup
+        android:id="@+id/rgPeriod"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="12dp">
+
+        <RadioButton
+            android:id="@+id/rbWeekly"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Weekly"
+            android:checked="true"
+            android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_cyan"
+            android:layout_marginEnd="24dp" />
+
+        <RadioButton
+            android:id="@+id/rbMonthly"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Monthly"
+            android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_cyan" />
+    </RadioGroup>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/scrollContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp"
+            android:background="@color/bg_dark">
+
+            <TextView
+                android:id="@+id/tvHeadline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Loading your stats..."
+                android:textColor="@color/accent_cyan"
+                android:textSize="20sp"
+                android:fontFamily="sans-serif-black"
+                android:textAlignment="center"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tvMostSnoozed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:textAlignment="center"
+                android:layout_marginBottom="24dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tasks Completed by Day"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:fontFamily="sans-serif-medium"
+                android:layout_marginBottom="8dp" />
+
+            <com.github.mikephil.charting.charts.BarChart
+                android:id="@+id/barChart"
+                android:layout_width="match_parent"
+                android:layout_height="200dp"
+                android:layout_marginBottom="24dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Crushed vs Snoozed"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:fontFamily="sans-serif-medium"
+                android:layout_marginBottom="8dp" />
+
+            <com.github.mikephil.charting.charts.PieChart
+                android:id="@+id/pieChart"
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:layout_marginBottom="24dp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnDownloadJpg"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_margin="20dp"
+        android:text="Save as JPG"
+        android:textSize="16sp"
+        android:textColor="@color/bg_dark"
+        app:backgroundTint="@color/accent_cyan"
+        app:cornerRadius="12dp" />
+
+</LinearLayout>
